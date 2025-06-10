@@ -6,6 +6,16 @@ export function middleware(request: NextRequest) {
     console.log("middleware running");
   // You can add your middleware logic here
   // For example: authentication checks, redirects, response modifications
+  const hostname = request.headers.get("host");
+  const url = request.nextUrl.clone();
+  console.log("Request URL:", url.toString());
+  const subdomain = hostname?.split(".")[0];
+  console.log("Subdomain:", subdomain);
+  // Redirect to a specific subdomain
+  if (subdomain === "login") {
+    url.pathname = "/login";
+    return NextResponse.redirect(url);
+  }
 
   // This just returns the request as-is (no modifications)
   return NextResponse.next();
