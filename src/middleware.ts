@@ -1,36 +1,100 @@
-import { NextResponse } from "next/server";
-import type { NextRequest } from "next/server";
+import { type NextRequest, NextResponse } from "next/server";
+import { rootDomain } from "@/lib/utils";
 
-// This function can be marked `async` if using `await` inside
-export function middleware(request: NextRequest) {
-  const requestMethod = request.method;
-  console.log("middleware running, method:", requestMethod);
-  // You can add your middleware logic here
-  // For example: authentication checks, redirects, response modifications
-  const hostname = request.headers.get("host");
-  const url = request.nextUrl.clone();
-  console.log("Request URL:", url.toString());
-  const subdomain = hostname?.split(".")[0];
-  console.log("Subdomain:", subdomain);
-  // Redirect to a specific subdomain
-  if (subdomain === "login") {
-    url.pathname = "/login";
-    return NextResponse.redirect(url);
+function extractSubdomain(request: NextRequest): string | null {
+  const url = request.url;
+  const host = request.headers.get("host") || "";
+  const hostname = host.split(":")[0];
+
+  // Local development environment
+  if (url.includes("localhost") || url.includes("127.0.0.1")) {
+    // Try to extract subdomain from the full URL
+    const fullUrlMatch = url.match(/http:\/\/([^.]+)\.localhost/);
+    if (fullUrlMatch && fullUrlMatch[1]) {
+      return fullUrlMatch[1];
+    }
+
+    // Fallback to host header approach
+    if (hostname.includes(".localhost")) {
+      return hostname.split(".")[0];
+    }
+
+    return null;
   }
 
-  // This just returns the request as-is (no modifications)
+  // Production environment
+  const rootDomainFormatted = rootDomain.split(":")[0];
+
+  // Handle preview deployment URLs (tenant---branch-name.vercel.app)
+  if (hostname.includes("---") && hostname.endsWith(".vercel.app")) {
+    const parts = hostname.split("---");
+    return parts.length > 0 ? parts[0] : null;
+  }
+
+  // Regular subdomain detection
+  const isSubdomain =
+    hostname !== rootDomainFormatted &&
+    hostname !== `www.${rootDomainFormatted}` &&
+    hostname.endsWith(`.${rootDomainFormatted}`);
+
+  return isSubdomain ? hostname.replace(`.${rootDomainFormatted}`, "") : null;
+}
+
+export async function middleware(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+  const subdomain = extractSubdomain(request);
+
+  // If we're on the main domain and trying to access /login, redirect to login subdomain
+  if (!subdomain && pathname === "/login") {
+    const host = request.headers.get("host") || "";
+
+    // Create login subdomain URL
+    const loginUrl = new URL(request.url);
+    loginUrl.host = `login.${host.split(":")[0]}`;
+
+    // Keep the port if it exists in the original URL
+    if (host.includes(":")) {
+      const port = host.split(":")[1];
+      loginUrl.port = port;
+    }
+
+    // Remove the /login path since it will be at the root of the login subdomain
+    loginUrl.pathname = "/";
+
+    return NextResponse.redirect(loginUrl);
+  }
+
+  // If we're on the login subdomain
+  if (subdomain === "login") {
+    // Rewrite to serve the login page content at the root
+    return NextResponse.rewrite(new URL(`/login`, request.url));
+  }
+
+  if (subdomain) {
+    // Additional subdomain handling
+    if (pathname.startsWith("/admin")) {
+      // Block access to admin from subdomains
+      return NextResponse.redirect(new URL("/", request.url));
+    }
+
+    // For the root path on a subdomain, rewrite to the subdomain page
+    if (pathname === "/") {
+      return NextResponse.rewrite(new URL(`/s/${subdomain}`, request.url));
+    }
+  }
+
+  // On the root domain, allow normal access
   return NextResponse.next();
 }
 
-// Optional: Configure which paths this middleware will run on
 export const config = {
   matcher: [
     /*
-     * Match all request paths except:
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
+     * Match all paths except for:
+     * 1. /api routes
+     * 2. /_next (Next.js internals)
+     * 3. all root files inside /public (e.g. /favicon.ico)
      */
-    "/((?!_next/static|_next/image|favicon.ico).*)",
+    "/((?!api|_next|[\\w-]+\\.\\w+).*)",
   ],
 };
