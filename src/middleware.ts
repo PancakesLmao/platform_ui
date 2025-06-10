@@ -3,7 +3,8 @@ import type { NextRequest } from "next/server";
 
 // This function can be marked `async` if using `await` inside
 export function middleware(request: NextRequest) {
-    console.log("middleware running");
+  const requestMethod = request.method;
+  console.log("middleware running, method:", requestMethod);
   // You can add your middleware logic here
   // For example: authentication checks, redirects, response modifications
   const hostname = request.headers.get("host");
